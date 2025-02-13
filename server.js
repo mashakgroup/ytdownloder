@@ -71,7 +71,7 @@ app.get('/api/download/download/:videoId', async (req, res, next) => {
 
         // Get video info
         const info = await ytdl.getInfo(videoUrl);
-        
+
         // Choose format
         const videoFormat = ytdl.chooseFormat(info.formats, { quality: format });
         if (!videoFormat) {
@@ -85,7 +85,7 @@ app.get('/api/download/download/:videoId', async (req, res, next) => {
 
         // Create download stream
         const stream = ytdl(videoUrl, { format: videoFormat });
-        
+
         // Handle stream errors
         stream.on('error', (error) => {
             console.error('Stream error:', error);
