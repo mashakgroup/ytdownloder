@@ -204,16 +204,11 @@
             transition: width 0.3s ease;
         }
 
-        .ad-container {
-            background: #f5f5f5;
-            border-radius: 12px;
-            padding: 20px;
-            text-align: center;
-            margin: 20px 0;
-        }
-
-        .dark .ad-container {
-            background: #2d2d2d;
+        .error {
+            color: var(--primary);
+            margin-top: 10px;
+            display: none;
+            font-size: 14px;
         }
 
         @media (max-width: 768px) {
@@ -236,11 +231,10 @@
     </nav>
 
     <div class="container main-content">
-        <div class="ad-container">Advertisement Space</div>
-
         <div class="download-box">
             <input type="text" class="url-input" id="urlInput" placeholder="Paste YouTube URL here...">
             <button class="download-btn" id="downloadBtn">Get Video</button>
+            <div class="error" id="error"></div>
 
             <div class="video-preview" id="videoPreview">
                 <img class="thumbnail" id="thumbnail" src="" alt="Video thumbnail">
@@ -256,8 +250,6 @@
                 </div>
             </div>
         </div>
-
-        <div class="ad-container">Advertisement Space</div>
     </div>
 
     <script>
@@ -274,7 +266,8 @@
             localStorage.theme = body.classList.contains('dark') ? 'dark' : 'light';
         });
 
-        // Video Download Logic
+        // Constants and Elements
+        const API_ENDPOINT = 'http://localhost:3000/api/download'; // Update this with your actual server endpoint
         const urlInput = document.getElementById('urlInput');
         const downloadBtn = document.getElementById('downloadBtn');
         const videoPreview = document.getElementById('videoPreview');
@@ -284,48 +277,72 @@
         const startDownload = document.getElementById('startDownload');
         const progressBar = document.getElementById('progressBar');
         const progress = document.getElementById('progress');
+        const error = document.getElementById('error');
 
-        async function getVideoInfo(url) {
-            // In a real implementation, this would make an API call to your backend
-            // For demo purposes, we'll simulate an API response
-            return new Promise((resolve) => {
-                setTimeout(() => {
-                    resolve({
-                        title: 'Sample YouTube Video',
-                        thumbnail: '/api/placeholder/800/450',
-                        formats: [
-                            { label: '1080p MP4', value: '1080' },
-                            { label: '720p MP4', value: '720' },
-                            { label: '480p MP4', value: '480' },
-                            { label: '360p MP4', value: '360' }
-                        ]
-                    });
-                }, 1500);
-            });
+        // YouTube URL parser
+        function getYouTubeId(url) {
+            const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|\&v=)([^#\&\?]*).*/;
+            const match = url.match(regExp);
+            return (match && match[2].length === 11) ? match[2] : null;
         }
 
-        async function downloadVideo(format) {
-            // Simulate download progress
-            progressBar.style.display = 'block';
-            for (let i = 0; i <= 100; i += 10) {
-                await new Promise(resolve => setTimeout(resolve, 500));
-                progress.style.width = `${i}%`;
+        async function getVideoInfo(videoId) {
+            try {
+                const response = await axios.get(`${API_ENDPOINT}/info/${videoId}`);
+                return response.data;
+            } catch (error) {
+                throw new Error(error.response?.data?.message || 'Failed to fetch video information');
             }
-            // In a real implementation, this would trigger the actual download
-            alert('Download completed!');
-            progressBar.style.display = 'none';
-            progress.style.width = '0%';
         }
 
+        async function downloadVideo(videoId, format) {
+            try {
+                progressBar.style.display = 'block';
+                const response = await axios({
+                    url: `${API_ENDPOINT}/download/${videoId}`,
+                    method: 'GET',
+                    params: { format },
+                    responseType: 'blob',
+                    onDownloadProgress: (progressEvent) => {
+                        const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total);
+                        progress.style.width = `${percentCompleted}%`;
+                    }
+                });
+
+                // Create download link
+                const url = window.URL.createObjectURL(new Blob([response.data]));
+                const link = document.createElement('a');
+                link.href = url;
+                link.setAttribute('download', `${videoTitle.textContent}.mp4`);
+                document.body.appendChild(link);
+                link.click();
+                link.remove();
+                window.URL.revokeObjectURL(url);
+            } catch (error) {
+                throw new Error(error.response?.data?.message || 'Download failed');
+            } finally {
+                progressBar.style.display = 'none';
+                progress.style.width = '0%';
+            }
+        }
+
+        // Event Listeners
         downloadBtn.addEventListener('click', async () => {
             const url = urlInput.value.trim();
-            if (!url) return;
+            const videoId = getYouTubeId(url);
+            
+            if (!videoId) {
+                error.textContent = 'Invalid YouTube URL';
+                error.style.display = 'block';
+                return;
+            }
 
             try {
                 downloadBtn.disabled = true;
                 downloadBtn.textContent = 'Loading...';
+                error.style.display = 'none';
 
-                const videoInfo = await getVideoInfo(url);
+                const videoInfo = await getVideoInfo(videoId);
                 
                 videoTitle.textContent = videoInfo.title;
                 thumbnail.src = videoInfo.thumbnail;
@@ -336,8 +353,9 @@
                     ).join('');
 
                 videoPreview.classList.add('active');
-            } catch (error) {
-                alert('Error fetching video information');
+            } catch (err) {
+                error.textContent = err.message;
+                error.style.display = 'block';
             } finally {
                 downloadBtn.disabled = false;
                 downloadBtn.textContent = 'Get Video';
@@ -345,29 +363,37 @@
         });
 
         startDownload.addEventListener('click', async () => {
+            const url = urlInput.value.trim();
+            const videoId = getYouTubeId(url);
             const format = formatSelect.value;
+
             if (!format) {
-                alert('Please select a format');
+                error.textContent = 'Please select a format';
+                error.style.display = 'block';
                 return;
             }
 
             try {
                 startDownload.disabled = true;
-                startDownload.textContent = 'Downloading...';
-                await downloadVideo(format);
-            } catch (error) {
-                alert('Error downloading video');
+                startDownload.textContent = 'Starting Download...';
+                error.style.display = 'none';
+
+                await downloadVideo(videoId, format);
+            } catch (err) {
+                error.textContent = err.message;
+                error.style.display = 'block';
             } finally {
                 startDownload.disabled = false;
                 startDownload.textContent = 'Download';
             }
         });
 
-        // Input validation
+        // URL validation
         urlInput.addEventListener('input', () => {
             const url = urlInput.value.trim();
-            const isValid = url.match(/^(https?:\/\/)?(www\.)?(youtube\.com|youtu\.be)\/.+$/);
-            downloadBtn.disabled = !isValid;
+            const videoId = getYouTubeId(url);
+            downloadBtn.disabled = !videoId;
+            error.style.display = 'none';
         });
     </script>
 </body>
